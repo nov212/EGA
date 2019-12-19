@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Excel = Microsoft.Office.Interop.Excel;
 
 namespace EGA
 {
@@ -37,9 +38,10 @@ namespace EGA
         public FitnessFunction FitFunc;
         private double mutationProbability;
         private int generationCount;
-        private Path BestPath;
-        public List<Path> Generation;
-        public List<Path> NextGeneration;
+        private List<Path> Generation;
+        private List<Path> Child;
+        private List<Path> Buffer;
+        private Path solution;
 
         public GeneticAlgorithm(int genomsInGeneration, int generationCount, double mutProb, FirstGenerationGenerator _fgg, CrossoverMethod _cm,
             MutationMethod _mm, SelectionMethod _sm, FitnessFunction ff)
@@ -50,7 +52,9 @@ namespace EGA
             this.mutationProbability = mutProb;
             this.generationCount = generationCount;
             Generation = new List<Path>();
-            NextGeneration = new List<Path>();
+            Child = new List<Path>();
+            Buffer=new List<Path>();
+            solution = new Path(genomLength);
             FitFunc = ff;
             this.cm = _cm;
             this.mm = _mm;
@@ -99,12 +103,12 @@ namespace EGA
         public void Reproduction()
         {
             Random rnd = new Random();
-            for (int i = 0; i < genomsInGeneration / 2; i++)
+            for (int i=0;i<genomsInGeneration;i++)
             {
-                int numOfFirstParent = rnd.Next(genomsInGeneration - 1);
-                int numOfSecondParent = rnd.Next(genomsInGeneration - 1);
+                int numOfFirstParent = rnd.Next(genomsInGeneration);
+                int numOfSecondParent = rnd.Next(genomsInGeneration);
                 while (numOfFirstParent == numOfSecondParent)
-                    numOfSecondParent = rnd.Next(genomsInGeneration - 1);
+                    numOfSecondParent = rnd.Next(genomsInGeneration);
                 Crossing(Generation[numOfFirstParent], Generation[numOfSecondParent]);
             }
         }
@@ -171,15 +175,12 @@ namespace EGA
 
         public void Saltation(Path path)
         {
-            path.Show();
             Random rnd = new Random();
             int Right = rnd.Next(genomLength - 1);
             int Left = rnd.Next(genomLength - 1);
-            System.Console.Write("{0} {1}", Left, Right);
             int temp = path[Left];
             path[Left] = path[Right];
             path[Right] = temp;
-            path.Show();
         }
 
         public void OX(Path firstParent, Path secondParent)
@@ -231,8 +232,8 @@ namespace EGA
                 }
                 Iterator = (Iterator + 1) % genomLength;
             }
-            Generation.Add(firstChild);
-            Generation.Add(secondChild);
+            Child.Add(firstChild);
+            Child.Add(secondChild);
         }
 
         public void PMX(Path firstParent, Path secondParent)
@@ -297,27 +298,11 @@ namespace EGA
                 }
                 Iterator = (Iterator + 1) % genomLength;
             }
-            Generation.Add(firstChild);
-            Generation.Add(secondChild);
+            Child.Add(firstChild);
+            Child.Add(secondChild);
         }
 
-        public void Run()
-        {
-            int CurrentGeneration = 1;
-            CreateFirstGeneration();
-            ShowInfo(Generation);
-            while (CurrentGeneration <= generationCount)
-            {
-                Reproduction();
-                for (int i = genomsInGeneration; i < Generation.Count(); i++)
-                    Mutation(Generation[i]);
-                Selection();
-                Merge();
-                System.Console.WriteLine("Generation {0}", CurrentGeneration);
-                ShowInfo(Generation);
-                CurrentGeneration++;
-            }
-        }
+        
 
         private void ShowInfo(List<Path> path)
         {
@@ -328,51 +313,59 @@ namespace EGA
             }
         }
 
-        private Path BestSolution(List<Path> path)
+        private Path BestPathInList(List<Path> path)
         {
-            Path solve = path[0];
+            Path best = path[0];
             double min = FitFunc.PathLength(path[0]);
             foreach(Path p in path)
                 if (FitFunc.PathLength(p)<min)
                 {
                     min = FitFunc.PathLength(p);
-                    solve = p;
+                    best = p;
                 }
-            return solve;
+            return best;
         }
 
         private void Selection()
         {
-            switch(sm)
+            Path bestPathInGeneration = BestPathInList(Generation);
+            Path bestPathInChild = BestPathInList(Child);
+            Path best = new Path(genomLength);
+            double bestLengthInGeneration = FitFunc.PathLength(bestPathInGeneration);
+            double bestLengthInChild = FitFunc.PathLength(bestPathInChild);
+            if (bestLengthInGeneration > bestLengthInChild)
+                best = bestPathInChild;
+            else
+                best = bestPathInGeneration;
+            double epsilon= FitFunc.PathLength(best)*0.1;
+            foreach (Path parent in Generation )
             {
-                case SelectionMethod.Tourney:
-                    {
-                        Tourney();
-                        break;
-                    }
-                case SelectionMethod.RouletteWheel:
-                    {
-                        RouletteWheel();
-                        break;
-                    }
+                if (Math.Abs(FitFunc.PathLength(parent) - FitFunc.PathLength(best)) < epsilon)
+                    Buffer.Add(parent);
             }
+                if (sm == SelectionMethod.Tourney)
+                    Tourney();
+                else
+                    if (sm == SelectionMethod.RouletteWheel)
+                    RouletteWheel();
         }
 
         private void Tourney()
         {
             Random rnd = new Random();
-            for (int i = 0; i < Generation.Count; i++)
+            while (Buffer.Count()<genomsInGeneration)
             {
-                int Ind1 = rnd.Next(genomsInGeneration - 1);
-                int Ind2 = rnd.Next(genomsInGeneration - 1);
+                List<Path> competitors = new List<Path>();
+                int Ind1 = rnd.Next(2*genomsInGeneration);
+                int Ind2 = rnd.Next(2*genomsInGeneration);
                 while (Ind2 == Ind1)
-                    Ind2 = rnd.Next(genomsInGeneration);
-                double len1 = FitFunc.PathLength(Generation[Ind1]);
-                double len2 = FitFunc.PathLength(Generation[Ind2]);
+                    Ind2 = rnd.Next(2*genomsInGeneration);
+                double len1 = FitFunc.PathLength(Child[Ind1]);
+                double len2 = FitFunc.PathLength(Child[Ind2]);
                 if (len1 < len2)
-                    NextGeneration.Add(Generation[Ind1]);
+                    Buffer.Add(Child[Ind1]);
                 else
-                    NextGeneration.Add(Generation[Ind2]);
+                    Buffer.Add(Child[Ind2]);
             }
         }
 
@@ -380,15 +373,15 @@ namespace EGA
         {
             Random rnd = new Random();
             double[] fitness = new double[genomsInGeneration];
-            fitness[0] = FitFunc.PathLength(Generation[genomsInGeneration]);
-            for (int i = genomsInGeneration + 1; i < Generation.Count(); i++)
-                fitness[i] = fitness[i - 1] + FitFunc.PathLength(Generation[i]);
-            double summary = fitness[Generation.Count() - 1];
-            for (int i=0;i<genomsInGeneration;i++)
+            fitness[0] = FitFunc.PathLength(Child[0]);
+            for (int i = 1; i < genomsInGeneration; i++)
+                fitness[i] = fitness[i - 1] + FitFunc.PathLength(Child[i]);
+            double summary = fitness[genomsInGeneration - 1];
+            while (Buffer.Count() < genomsInGeneration)
             {
                 double index = rnd.NextDouble() * summary;
-                int start = genomsInGeneration;
-                int end = 2 * genomsInGeneration - 1;
+                int start = 0;
+                int end = genomsInGeneration - 1;
                 int center = 0;
                 while(start<end)
                 {
@@ -398,18 +391,57 @@ namespace EGA
                     else
                         start = center + 1;
                 }
-                NextGeneration[i] = Generation[end];
+                Buffer.Add(Child[end]);
             }
         }
 
         private void Merge()
         {
             Generation.Clear();
-            foreach(Path p in NextGeneration )
+            foreach(Path p in Buffer )
             {
                 Generation.Add(new Path(p));
             }
-            NextGeneration.Clear();
+            Child.Clear();
+            Buffer.Clear();
+        }
+
+        public void Run()
+        {
+            int CurrentGeneration = 1;
+            int countOfSameSolution = 0;
+            CreateFirstGeneration();
+            solution = BestPathInList(Generation);
+            double bestLength = FitFunc.PathLength(solution);
+            System.Console.WriteLine("Generation 1");
+            ShowInfo(Generation);
+            System.Console.Write("Best solution: ");
+            solution.Show();
+            System.Console.WriteLine("\t{0}", bestLength);
+            CurrentGeneration++;
+            while (CurrentGeneration <= generationCount && countOfSameSolution <= 10)
+            {
+                Reproduction();
+                foreach (Path child in Child)
+                    Mutation(child);
+                Selection();
+                Merge();
+                System.Console.WriteLine("Generation {0}", CurrentGeneration);
+                ShowInfo(Generation);
+                Path best = BestPathInList(Generation);
+                if (solution.Equals(best))
+                    countOfSameSolution++;
+                else
+                {
+                    bestLength = FitFunc.PathLength(best);
+                    solution = best;
+                    countOfSameSolution = 0;
+                }
+                System.Console.Write("Best: ");
+                solution.Show();
+                System.Console.WriteLine("\t{0}", bestLength);
+                CurrentGeneration++;
+            }
         }
     }
 }
